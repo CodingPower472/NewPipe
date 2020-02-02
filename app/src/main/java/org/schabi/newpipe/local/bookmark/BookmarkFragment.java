@@ -12,6 +12,7 @@ import androidx.fragment.app.FragmentManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import io.reactivex.disposables.Disposable;
 import org.reactivestreams.Subscriber;
@@ -23,6 +24,7 @@ import org.schabi.newpipe.database.LocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistLocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistMetadataEntry;
 import org.schabi.newpipe.database.playlist.model.PlaylistRemoteEntity;
+import org.schabi.newpipe.database.stream.model.StreamEntity;
 import org.schabi.newpipe.local.BaseLocalListFragment;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
 import org.schabi.newpipe.local.playlist.RemotePlaylistManager;
@@ -63,6 +65,9 @@ public final class BookmarkFragment
         localPlaylistManager = new LocalPlaylistManager(database);
         remotePlaylistManager = new RemotePlaylistManager(database);
         disposables = new CompositeDisposable();
+        //Log.e("num_playlists_l", "Num playlists: " + localPlaylistManager.getPlaylists().count());
+        //Log.e("test", "This is a test");
+        //localPlaylistManager.createPlaylist("Auto Playlist", new ArrayList<>());
     }
 
     @Nullable
@@ -196,6 +201,26 @@ public final class BookmarkFragment
             public void onNext(List<PlaylistLocalItem> subscriptions) {
                 handleResult(subscriptions);
                 if (databaseSubscription != null) databaseSubscription.request(1);
+                Log.e("num_playlists", "# Playlists: " + subscriptions.size());
+                boolean hasAutoPlaylist = false;
+                for (PlaylistLocalItem s : subscriptions) {
+                    if (s instanceof PlaylistMetadataEntry) {
+                        if (((PlaylistMetadataEntry)s).thumbnailUrl.equals(LocalPlaylistManager.AUTO_PLAYLIST_THUMBNAIL)) {
+                            hasAutoPlaylist = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasAutoPlaylist) {
+                    localPlaylistManager.createPlaylist("Test Playlist", new ArrayList<>())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(longs -> Toast.makeText(getContext(), "Created auto-playlist successfully", Toast.LENGTH_LONG).show());
+                }
+                if (subscriptions.size() == 0) {
+                    Log.e("creating_auto_playlist", "Creating auto playlist");
+                } else {
+                    Log.e("uid_of_playlist", "UID: " + ((PlaylistMetadataEntry)subscriptions.get(0)).uid);
+                }
             }
 
             @Override

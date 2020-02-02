@@ -23,6 +23,8 @@ import io.reactivex.schedulers.Schedulers;
 
 public class LocalPlaylistManager {
 
+    public static final String AUTO_PLAYLIST_THUMBNAIL = "https://images.pexels.com/photos/414612/pexels-photo-414612.jpeg?auto=compress&cs=tinysrgb&dpr=1&w=500";
+
     private final AppDatabase database;
     private final StreamDAO streamTable;
     private final PlaylistDAO playlistTable;
@@ -37,10 +39,14 @@ public class LocalPlaylistManager {
 
     public Maybe<List<Long>> createPlaylist(final String name, final List<StreamEntity> streams) {
         // Disallow creation of empty playlists
-        if (streams.isEmpty()) return Maybe.empty();
-        final StreamEntity defaultStream = streams.get(0);
-        final PlaylistEntity newPlaylist =
-                new PlaylistEntity(name, defaultStream.getThumbnailUrl());
+        //if (streams.isEmpty()) return Maybe.empty();
+        //final StreamEntity defaultStream = streams.get(0);
+        final PlaylistEntity newPlaylist;
+        if (streams.isEmpty()) {
+            newPlaylist = new PlaylistEntity(name /*defaultStream.getThumbnailUrl()*/, AUTO_PLAYLIST_THUMBNAIL);
+        } else {
+            newPlaylist = new PlaylistEntity(name, streams.get(0).getThumbnailUrl());
+        }
 
         return Maybe.fromCallable(() -> database.runInTransaction(() ->
                 upsertStreams(playlistTable.insert(newPlaylist), streams, 0))
