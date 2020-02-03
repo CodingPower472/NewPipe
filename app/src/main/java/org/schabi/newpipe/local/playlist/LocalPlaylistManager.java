@@ -37,20 +37,28 @@ public class LocalPlaylistManager {
         playlistStreamTable = db.playlistStreamDAO();
     }
 
-    public Maybe<List<Long>> createPlaylist(final String name, final List<StreamEntity> streams) {
+    public Maybe<List<Long>> createPlaylist(final String name, final List<StreamEntity> streams, final String thumbnailUrl) {
         // Disallow creation of empty playlists
         //if (streams.isEmpty()) return Maybe.empty();
         //final StreamEntity defaultStream = streams.get(0);
         final PlaylistEntity newPlaylist;
-        if (streams.isEmpty()) {
-            newPlaylist = new PlaylistEntity(name /*defaultStream.getThumbnailUrl()*/, AUTO_PLAYLIST_THUMBNAIL);
+        if (thumbnailUrl == null) {
+            if (streams.isEmpty()) {
+                newPlaylist = new PlaylistEntity(name /*defaultStream.getThumbnailUrl()*/, AUTO_PLAYLIST_THUMBNAIL);
+            } else {
+                newPlaylist = new PlaylistEntity(name, streams.get(0).getThumbnailUrl());
+            }
         } else {
-            newPlaylist = new PlaylistEntity(name, streams.get(0).getThumbnailUrl());
+            newPlaylist = new PlaylistEntity(name, thumbnailUrl);
         }
 
         return Maybe.fromCallable(() -> database.runInTransaction(() ->
                 upsertStreams(playlistTable.insert(newPlaylist), streams, 0))
         ).subscribeOn(Schedulers.io());
+    }
+
+    public Maybe<List<Long>> createPlaylist(final String name, final List<StreamEntity> streams) {
+        return createPlaylist(name, streams, null).subscribeOn(Schedulers.io());
     }
 
     public Maybe<List<Long>> appendToPlaylist(final long playlistId,
@@ -60,6 +68,18 @@ public class LocalPlaylistManager {
                 .map(maxJoinIndex -> database.runInTransaction(() ->
                         upsertStreams(playlistId, streams, maxJoinIndex + 1))
                 ).subscribeOn(Schedulers.io());
+    }
+
+    public List<Long> setPlaylist(final long playlistId, final List<StreamEntity> streams) {
+        // TODO: like insert/upsert but removes all existing videos in the playlist
+        /*return database.runInTransaction(() -> {
+            playlistStreamTable.deleteBatch(playlistId);
+            return upsertStreams(playlistId, streams, 0);
+        });*/
+
+        //return deletePlaylist(playlistId).ignoreElement().andThen(createPlaylist())
+
+        return new ArrayList<>();
     }
 
     private List<Long> upsertStreams(final long playlistId,
@@ -100,6 +120,11 @@ public class LocalPlaylistManager {
                 .subscribeOn(Schedulers.io());
     }
 
+    public Completable clearPlaylists() {
+        return Completable.fromAction(() -> playlistTable.deleteAll())
+                .subscribeOn(Schedulers.io());
+    }
+
     public Maybe<Integer> renamePlaylist(final long playlistId, final String name) {
         return modifyPlaylist(playlistId, name, null);
     }
@@ -109,8 +134,19 @@ public class LocalPlaylistManager {
         return modifyPlaylist(playlistId, null, thumbnailUrl);
     }
 
+    public PlaylistEntity getPlaylistEntity(final long playlistId) {
+        return playlistTable.getPlaylist(playlistId).blockingFirst().get(0);
+    }
+
     public String getPlaylistThumbnail(final long playlistId) {
         return playlistTable.getPlaylist(playlistId).blockingFirst().get(0).getThumbnailUrl();
+    }
+
+    public Maybe<List<StreamEntity>> modifyPlaylistStreams(final long playlistId, List<StreamEntity> streams) {
+        return playlistStreamTable.getOrderedStreamsOf(playlistId)
+                .firstElement()
+                .map(s -> streams)
+                .subscribeOn(Schedulers.io());
     }
 
     private Maybe<Integer> modifyPlaylist(final long playlistId,

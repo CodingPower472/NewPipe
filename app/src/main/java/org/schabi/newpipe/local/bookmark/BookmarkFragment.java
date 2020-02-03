@@ -14,6 +14,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+import io.reactivex.Observable;
 import io.reactivex.disposables.Disposable;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -24,16 +25,26 @@ import org.schabi.newpipe.database.LocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistLocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistMetadataEntry;
 import org.schabi.newpipe.database.playlist.model.PlaylistRemoteEntity;
+import org.schabi.newpipe.database.playlist.model.PlaylistStreamEntity;
 import org.schabi.newpipe.database.stream.model.StreamEntity;
+import org.schabi.newpipe.extractor.InfoItem;
+import org.schabi.newpipe.extractor.NewPipe;
+import org.schabi.newpipe.extractor.StreamingService;
+import org.schabi.newpipe.extractor.search.SearchInfo;
+import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.local.BaseLocalListFragment;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
 import org.schabi.newpipe.local.playlist.RemotePlaylistManager;
 import org.schabi.newpipe.report.UserAction;
+import org.schabi.newpipe.util.ExtractorHelper;
 import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.OnClickGesture;
+import org.schabi.newpipe.database.playlist.*;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 import icepick.State;
@@ -48,10 +59,109 @@ public final class BookmarkFragment
     @State
     protected Parcelable itemsListState;
 
+    public List<StreamEntity> recommendations;
+    public String RECOMMENDATIONS_PLAYLIST_THUMBNAIL = "https://cdn.pixabay.com/photo/2015/02/24/15/41/dog-647528__340.jpg";
+
     private Subscription databaseSubscription;
     private CompositeDisposable disposables = new CompositeDisposable();
     private LocalPlaylistManager localPlaylistManager;
     private RemotePlaylistManager remotePlaylistManager;
+
+    private void createOrUpdateRecommendationsPlaylist(List<PlaylistMetadataEntry> playlists) {
+        // TODO: I think this method might be the problem
+        boolean foundExisting = false;
+        long existingUid = 0;
+        for (PlaylistMetadataEntry pme : playlists) {
+            if (pme.thumbnailUrl.equals(RECOMMENDATIONS_PLAYLIST_THUMBNAIL)) {
+                foundExisting = true;
+                existingUid = pme.uid;
+                Log.e("found_existing", "Found existing: " + pme.name);
+            }
+        }
+        Log.e("pme_uid", "" + existingUid);
+        if (foundExisting) {
+            localPlaylistManager.modifyPlaylistStreams(existingUid, recommendations)
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(newStreams -> Toast.makeText(getContext(), "Modified existing", Toast.LENGTH_SHORT).show(), err -> Log.e("error", "Error modifying recommended playlist", err));
+        } else {
+            Log.e("making_playlist", "Creating playlist");
+            localPlaylistManager.createPlaylist("Recommended for you", recommendations, RECOMMENDATIONS_PLAYLIST_THUMBNAIL)
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(longs -> Toast.makeText(getContext(), "Recommended Playlist Created", Toast.LENGTH_LONG), err -> Log.e("error", err.toString()));
+        }
+    }
+
+    private boolean hasChanged(List<PlaylistLocalItem> before, List<PlaylistLocalItem> after) {
+        if (before.size() != after.size()) return true;
+        int size = before.size();
+        for (int i = 0; i < size; i++) {
+            PlaylistLocalItem bef = before.get(i);
+            PlaylistLocalItem aft = after.get(i);
+            boolean befIsMeta = bef instanceof PlaylistMetadataEntry;
+            boolean aftIsMeta = aft instanceof PlaylistMetadataEntry;
+            if (befIsMeta && aftIsMeta) {
+                PlaylistMetadataEntry pmeBef = (PlaylistMetadataEntry) bef;
+                PlaylistMetadataEntry pmeAft = (PlaylistMetadataEntry) aft;
+                Flowable<List<PlaylistStreamEntry>> befEntries = localPlaylistManager.getPlaylistStreams(pmeBef.uid);
+                Flowable<List<PlaylistStreamEntry>> aftEntries = localPlaylistManager.getPlaylistStreams(pmeAft.uid);
+
+            }
+        }
+        return false; // PLACEHOLDER
+    }
+
+    public Single<List<StreamEntity>> getRecommendations(List<PlaylistStreamEntry> liked) {
+        HashMap<String, Integer> artistFrequencies = new HashMap<>();
+        ArrayList<StreamEntity> pureLiked = new ArrayList<>();
+        Log.e("num_liked", "" + liked.size());
+        /*StreamingService service = null;
+        try {
+            service = NewPipe.getService(0); // 0 should correspond to YouTube
+        } catch (Throwable err) {
+            Log.e("error_getting_service", "Failed to get service for service ID 0: " + err);
+            return result;
+        }*/
+        List<Single<SearchInfo>> observables = new ArrayList<>();
+        for (PlaylistStreamEntry entry : liked) {
+            String artist = entry.uploader;
+            Log.e("artist", artist);
+            StreamEntity likeAsEntity = new StreamEntity(entry.serviceId, entry.title, entry.url, entry.streamType, entry.thumbnailUrl, entry.uploader, entry.duration);
+            pureLiked.add(likeAsEntity);
+            if (artistFrequencies.containsKey(artist)) {
+                artistFrequencies.put(artist, artistFrequencies.get(artist) + 1);
+            } else {
+                artistFrequencies.put(artist, 1);
+            }
+            Single<SearchInfo> ssi = ExtractorHelper.searchFor(0, artist + " music", new ArrayList<>(), "");
+            Log.e("searching", "Searching:" + artist + " music");
+            observables.add(ssi);
+        }
+        if (pureLiked.isEmpty()) {
+            return Single.just(new ArrayList<>());
+        } else {
+            return Single.zip(observables, list -> {
+                List<StreamEntity> streamEntities = new ArrayList<>();
+                for (int i = 0; i < list.length; i++) {
+                    Object si = list[i];
+                    if (si instanceof SearchInfo) {
+                        SearchInfo s = (SearchInfo) si;
+                        List<InfoItem> items = s.getRelatedItems();
+                        streamEntities.add(pureLiked.get(i));
+                        for (int j = 0; j < Math.min(10, items.size()); j++) {
+                            InfoItem item = items.get(j);
+                            if (item.getInfoType() == InfoItem.InfoType.STREAM && !item.getUrl().equals(pureLiked.get(i).getUrl())) {
+                                streamEntities.add(new StreamEntity(0, item.getName(), item.getUrl(), StreamType.VIDEO_STREAM, item.getThumbnailUrl(), "Unknown", 100));
+                            }
+                        }
+                    } else {
+                        throw new Error("Object was not a search info");
+                    }
+                }
+                Log.e("seay", streamEntities.size() + "");
+                return streamEntities;
+            });
+        }
+    }
 
     ///////////////////////////////////////////////////////////////////////////
     // Fragment LifeCycle - Creation
@@ -68,6 +178,9 @@ public final class BookmarkFragment
         //Log.e("num_playlists_l", "Num playlists: " + localPlaylistManager.getPlaylists().count());
         //Log.e("test", "This is a test");
         //localPlaylistManager.createPlaylist("Auto Playlist", new ArrayList<>());
+        localPlaylistManager.clearPlaylists()
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe();
     }
 
     @Nullable
@@ -183,6 +296,20 @@ public final class BookmarkFragment
         itemsListState = null;
     }
 
+    private boolean areEquivalent(List<PlaylistStreamEntry> a, List<PlaylistStreamEntry> b) {
+        if (a.size() != b.size()) return false;
+        int size = a.size();
+        for (int i = 0; i < size; i++) {
+            PlaylistStreamEntry aElem = a.get(i);
+            PlaylistStreamEntry bElem = b.get(i);
+            // TODO: if necessary
+        }
+        return false;
+    }
+
+    List<PlaylistStreamEntry> lastFavoriteStreams = null;
+    long lastPid = 0;
+
     ///////////////////////////////////////////////////////////////////////////
     // Subscriptions Loader
     ///////////////////////////////////////////////////////////////////////////
@@ -200,14 +327,98 @@ public final class BookmarkFragment
             @Override
             public void onNext(List<PlaylistLocalItem> subscriptions) {
                 handleResult(subscriptions);
+                // if it's the same as last time, we don't need to run
+                /*if (subscriptions.size() == lastPlaylistLocalItem.size() && subscriptions.size() > 0) {
+                    boolean same = true;
+                    for (int i = 0; i < subscriptions.size(); i++) {
+                        PlaylistLocalItem s1 = subscriptions.get(i);
+                        PlaylistLocalItem s2 = lastPlaylistLocalItem.get(i);
+                        if (!s1.getOrderingName().equals(s2.getOrderingName())) {
+                            same = false;
+                            break;
+                        }
+                        if (s1 instanceof PlaylistLocalItem && s2 instanceof PlaylistLocalItem) {
+
+                        }
+                    }
+                    if (same) return;
+                }
+                lastPlaylistLocalItem = new ArrayList<>(subscriptions);*/
                 if (databaseSubscription != null) databaseSubscription.request(1);
+                /*boolean hasFavoritesPlaylist = false;
+                long pid = 0;
+                Flowable<List<PlaylistStreamEntry>> favoriteStreams = null;
+                List<PlaylistMetadataEntry> metaList = new ArrayList<>();
+
+                for (PlaylistLocalItem pli : subscriptions) {
+                    if (pli instanceof PlaylistMetadataEntry) {
+                        PlaylistMetadataEntry pme = (PlaylistMetadataEntry) pli;
+                        metaList.add(pme);
+                        if (pme.thumbnailUrl.equals(LocalPlaylistManager.AUTO_PLAYLIST_THUMBNAIL)) {
+                            hasFavoritesPlaylist = true;
+                            pid = pme.uid;
+                            favoriteStreams = localPlaylistManager.getPlaylistStreams(pid);
+                        }
+                    }
+                }
+
+                if (!hasFavoritesPlaylist) {
+                    localPlaylistManager.createPlaylist("Favorites", new ArrayList<>())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe();
+                }
+
+                //if (pid == lastPid) return;
+                lastPid = pid;
+
+                Log.e("favorites_playlist", "Favorites playlist ID changed");
+
+                // check if last and current favorite streams are equivalent
+                if (favoriteStreams != null) {
+                    favoriteStreams.subscribe(new Subscriber<List<PlaylistStreamEntry>>() {
+
+                        @Override
+                        public void onSubscribe(Subscription s) {
+                            s.request(1);
+                        }
+
+                        @Override
+                        public void onNext(List<PlaylistStreamEntry> playlistStreamEntries) {
+                            if (lastFavoriteStreams != null && lastFavoriteStreams.equals(playlistStreamEntries)) return;
+                            Log.e("update_favorites", "Favorites have updated");
+                            lastFavoriteStreams = playlistStreamEntries;
+                            if (playlistStreamEntries.isEmpty()) {
+                                recommendations = new ArrayList<>();
+                                createOrUpdateRecommendationsPlaylist(metaList);
+                            } else {
+                                Single<List<StreamEntity>> recommendationsSingle = getRecommendations(playlistStreamEntries);
+                                recommendationsSingle.subscribe(recs -> {
+                                    recommendations = recs;
+                                    Log.e("recommendations_num", "# recommendations: " + recommendations.size());
+                                    createOrUpdateRecommendationsPlaylist(metaList);
+                                }, err -> Log.e("err_recommendations", "Error retrieving recommendations", err));
+                            }
+                        }
+
+                        @Override
+                        public void onError(Throwable t) {
+                            Log.e("err_fetching_favorites", "Error fetching favorites from playlist", t);
+                        }
+
+                        @Override
+                        public void onComplete() {
+
+                        }
+                    });
+                }*/
                 Log.e("num_playlists", "# Playlists: " + subscriptions.size());
                 boolean hasAutoPlaylist = false;
+                List<PlaylistMetadataEntry> metaList = new ArrayList<>();
                 for (PlaylistLocalItem s : subscriptions) {
                     if (s instanceof PlaylistMetadataEntry) {
+                        metaList.add((PlaylistMetadataEntry)s);
                         if (((PlaylistMetadataEntry)s).thumbnailUrl.equals(LocalPlaylistManager.AUTO_PLAYLIST_THUMBNAIL)) {
                             hasAutoPlaylist = true;
-                            break;
                         }
                     }
                 }
@@ -216,11 +427,56 @@ public final class BookmarkFragment
                             .observeOn(AndroidSchedulers.mainThread())
                             .subscribe(longs -> Toast.makeText(getContext(), "Created auto-playlist successfully", Toast.LENGTH_LONG).show());
                 }
-                if (subscriptions.size() == 0) {
-                    Log.e("creating_auto_playlist", "Creating auto playlist");
-                } else {
-                    Log.e("uid_of_playlist", "UID: " + ((PlaylistMetadataEntry)subscriptions.get(0)).uid);
+                Flowable<List<PlaylistStreamEntry>> favoritesStreams = null;
+                if (subscriptions.size() > 0) {
+                    for (PlaylistLocalItem pli : subscriptions) {
+                        if (pli instanceof PlaylistMetadataEntry) {
+                            PlaylistMetadataEntry pme = (PlaylistMetadataEntry) pli;
+                            if (pme.thumbnailUrl.equals(LocalPlaylistManager.AUTO_PLAYLIST_THUMBNAIL)) {
+                                long pid = pme.uid;
+                                favoritesStreams = localPlaylistManager.getPlaylistStreams(pid);
+                            }
+                        }
+                    }
                 }
+                if (favoritesStreams != null) {
+                    favoritesStreams.subscribe(new Subscriber<List<PlaylistStreamEntry>>() {
+                        @Override
+                        public void onSubscribe(Subscription s) {
+
+                            Log.e("subbingeyey", "Subscribing");
+                            s.request(1);
+                        }
+
+                        @Override
+                        public void onNext(List<PlaylistStreamEntry> playlistStreamEntries) {
+                            Log.e("changed_favorites", "Favorites have been changed");
+                            Log.e("entries_for_first", playlistStreamEntries.size() + "");
+                            if (playlistStreamEntries.isEmpty()) return;
+                            Single<List<StreamEntity>> r = getRecommendations(playlistStreamEntries);
+                            if (r != null) {
+                                    r.subscribe(rec -> {
+                                        Log.e("r", rec.size() + "");
+                                        recommendations = rec;
+                                        createOrUpdateRecommendationsPlaylist(metaList);
+                                    }, err -> {
+                                        Log.e("err_recomm", "Error with recommendations: " + err, err);
+                                    });
+                            }
+
+                        }
+
+                        @Override
+                        public void onError(Throwable t) {
+                            Log.e("err", "Error" + t);
+                        }
+
+                        @Override
+                        public void onComplete() {
+                        }
+                    });
+                }
+
             }
 
             @Override
