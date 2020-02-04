@@ -86,6 +86,13 @@ public class PlaylistRemoteEntity implements PlaylistLocalItem {
                 && TextUtils.equals(getUploader(), info.getUploaderName());
     }
 
+    @Override
+    public boolean equals(final Object other) {
+        if (!(other instanceof PlaylistRemoteEntity)) return false;
+        PlaylistRemoteEntity otherPRE = (PlaylistRemoteEntity) other;
+        return uid == otherPRE.uid;
+    }
+
     public long getUid() {
         return uid;
     }

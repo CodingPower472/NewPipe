@@ -26,6 +26,13 @@ public class PlaylistMetadataEntry implements PlaylistLocalItem {
     }
 
     @Override
+    public boolean equals(Object other) {
+        if (!(other instanceof PlaylistMetadataEntry)) return false;
+        PlaylistMetadataEntry otherPME = (PlaylistMetadataEntry) other;
+        return uid == otherPME.uid;
+    }
+
+    @Override
     public LocalItemType getLocalItemType() {
         return LocalItemType.PLAYLIST_LOCAL_ITEM;
     }

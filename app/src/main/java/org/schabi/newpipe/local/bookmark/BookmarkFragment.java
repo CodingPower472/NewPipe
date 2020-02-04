@@ -3,6 +3,7 @@ package org.schabi.newpipe.local.bookmark;
 import android.app.AlertDialog;
 import android.app.AlertDialog.Builder;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Parcelable;
 import android.util.Log;
 import android.widget.EditText;
@@ -12,6 +13,7 @@ import androidx.fragment.app.FragmentManager;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.Toast;
 
 import io.reactivex.disposables.Disposable;
 import org.reactivestreams.Subscriber;
@@ -22,7 +24,9 @@ import org.schabi.newpipe.database.AppDatabase;
 import org.schabi.newpipe.database.LocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistLocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistMetadataEntry;
+import org.schabi.newpipe.database.playlist.PlaylistStreamEntry;
 import org.schabi.newpipe.database.playlist.model.PlaylistRemoteEntity;
+import org.schabi.newpipe.database.stream.model.StreamEntity;
 import org.schabi.newpipe.local.BaseLocalListFragment;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
 import org.schabi.newpipe.local.playlist.RemotePlaylistManager;
@@ -31,6 +35,7 @@ import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.OnClickGesture;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -50,6 +55,7 @@ public final class BookmarkFragment
     private CompositeDisposable disposables = new CompositeDisposable();
     private LocalPlaylistManager localPlaylistManager;
     private RemotePlaylistManager remotePlaylistManager;
+    private List<String> favoritesURLs;
 
     ///////////////////////////////////////////////////////////////////////////
     // Fragment LifeCycle - Creation
@@ -63,6 +69,49 @@ public final class BookmarkFragment
         localPlaylistManager = new LocalPlaylistManager(database);
         remotePlaylistManager = new RemotePlaylistManager(database);
         disposables = new CompositeDisposable();
+
+        // NOT USED, USELESS CODE:
+        /*Handler handler = new Handler();
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                remotePlaylistManager.getPlaylists()
+                        .first(new ArrayList<>())
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribe(playlists -> {
+                            Log.i("playlists", "Got playlists, num: " + playlists.size());
+                            PlaylistMetadataEntry favoritesPME = null;
+                             for (PlaylistLocalItem pli : playlists) {
+                                 if (pli instanceof PlaylistMetadataEntry && pli.getOrderingName().toLowerCase().equals("favorites")) {
+                                     favoritesPME = (PlaylistMetadataEntry) pli;
+                                 }
+                             }
+                             if (favoritesPME != null) {
+                                 Log.i("got_favorites", "Retrieved playlists");
+                                 localPlaylistManager.getPlaylistStreams(favoritesPME.uid)
+                                         .first(new ArrayList<>())
+                                         .observeOn(AndroidSchedulers.mainThread())
+                                         .subscribe(streams -> {
+                                             List<String> urls = new ArrayList<>();
+                                             for (PlaylistStreamEntry pse : streams) {
+                                                 urls.add(pse.url);
+                                             }
+                                             Log.i("new_urls", "New favorite streams URLs: " + Arrays.toString(urls.toArray()));
+                                             if (urls.equals(favoritesURLs)) {
+                                                 Log.i("same", "Same as previous");
+                                                 return;
+                                             }
+                                             favoritesURLs = urls;
+
+                                         }, err -> {
+                                             Log.e("err_streams", "Error obtaining favorite streams", err);
+                                         });
+                             }
+                        }, err -> {
+                            Log.e("err_playlists", "Error fetching playlists", err);
+                        });
+                handler.postDelayed(this, 10000);
+            }
+        }, 5000);*/
     }
 
     @Nullable
@@ -182,6 +231,8 @@ public final class BookmarkFragment
     // Subscriptions Loader
     ///////////////////////////////////////////////////////////////////////////
 
+    List<PlaylistLocalItem> lastPlaylists;
+
     private Subscriber<List<PlaylistLocalItem>> getPlaylistsSubscriber() {
         return new Subscriber<List<PlaylistLocalItem>>() {
             @Override
@@ -194,8 +245,45 @@ public final class BookmarkFragment
 
             @Override
             public void onNext(List<PlaylistLocalItem> subscriptions) {
+                // STOCK
                 handleResult(subscriptions);
                 if (databaseSubscription != null) databaseSubscription.request(1);
+                // END STOCK
+
+                // we can trust .equals because they were overridden for both PlaylistMetadataEntry and PlaylistRemoteEntry
+                /*if (subscriptions.equals(lastPlaylists)) {
+                    Log.i("playlists_no_change", "No change to playlists");
+                    return;
+                }
+                if (lastPlaylists != null && !lastPlaylists.isEmpty() && !subscriptions.isEmpty()) {
+                    Log.i("are_equal", "" + subscriptions.get(0).equals(lastPlaylists.get(0)));
+                }
+                lastPlaylists = subscriptions;
+                for (PlaylistLocalItem pli : subscriptions) {
+                    boolean isMeta = pli instanceof PlaylistMetadataEntry;
+                    Log.i("found_pli", "Has playlist with name " + pli.getOrderingName() + " and is" + (isMeta ? "" : " not") + " meta");
+                }
+                if (subscriptions.size() > 0) {
+                    PlaylistLocalItem firstPli = subscriptions.get(0);
+                    if (firstPli instanceof PlaylistMetadataEntry) {
+                        PlaylistMetadataEntry pme = (PlaylistMetadataEntry) firstPli;
+                        Log.i("has_meta", "Has a local playlist with name " + pme.getOrderingName() + " and uid " + pme.uid);
+
+                        Flowable<List<PlaylistStreamEntry>> streamsFlowable = localPlaylistManager.getPlaylistStreams(pme.uid);
+                        streamsFlowable.first(new ArrayList<>())
+                                .observeOn(AndroidSchedulers.mainThread())
+                                .subscribe(streams -> {
+                                    Log.i("update_streams", "Update streams");
+                                });
+                        streamsFlowable.subscribe(streams -> {
+                            Log.i("update_streams", "Update streams for playlist with uid " + pme.uid);
+
+                        }, err -> {
+                            Log.e("err_retrv_streams", "Error retrieving streams", err);
+                        });
+                    }
+                }
+                Toast.makeText(getContext(), "Playlists changed", Toast.LENGTH_SHORT).show();*/
             }
 
             @Override
@@ -209,6 +297,64 @@ public final class BookmarkFragment
         };
     }
 
+    List<String> lastFavURLs = null;
+
+    // TODO: not a todo this is just the actual right method
+    private void playlistsUpdate(@NonNull List<PlaylistLocalItem> result) {
+        /*if (result.equals(lastPlaylists)) {
+            Log.i("playlists_no_change", "No change to playlists");
+            return;
+        }
+        if (lastPlaylists != null && !lastPlaylists.isEmpty() && !result.isEmpty()) {
+            Log.i("are_equal", "" + result.get(0).equals(lastPlaylists.get(0)));
+        }*/
+        lastPlaylists = result;
+        for (PlaylistLocalItem pli : result) {
+            boolean isMeta = pli instanceof PlaylistMetadataEntry;
+            Log.i("found_pli", "Has playlist with name " + pli.getOrderingName() + " and is" + (isMeta ? "" : " not") + " meta");
+            if (!isMeta) continue;
+            PlaylistMetadataEntry pme = (PlaylistMetadataEntry) pli;
+            if (pme.getOrderingName().equalsIgnoreCase("Favorites")) {
+                Log.i("found_favorites", "Found favorites (uid " + pme.uid + ")");
+                Flowable<List<PlaylistStreamEntry>> streamsFlowable = localPlaylistManager.getPlaylistStreams(pme.uid);
+                streamsFlowable.first(new ArrayList<>())
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribe(streams -> {
+                            List<String> urls = new ArrayList<>(streams.size());
+                            for (PlaylistStreamEntry pse : streams) {
+                                urls.add(pse.url);
+                            }
+                            if (!urls.equals(lastFavURLs)) {
+                                Log.i("update_streams", "Update streams");
+                                lastFavURLs = urls;
+
+                            }
+                        });
+            }
+        }
+        /*if (result.size() > 0) {
+            PlaylistLocalItem firstPli = result.get(0);
+            if (firstPli instanceof PlaylistMetadataEntry) {
+                PlaylistMetadataEntry pme = (PlaylistMetadataEntry) firstPli;
+                Log.i("has_meta", "Has a local playlist with name " + pme.getOrderingName() + " and uid " + pme.uid);
+
+                Flowable<List<PlaylistStreamEntry>> streamsFlowable = localPlaylistManager.getPlaylistStreams(pme.uid);
+                streamsFlowable.first(new ArrayList<>())
+                        .observeOn(AndroidSchedulers.mainThread())
+                        .subscribe(streams -> {
+                            Log.i("update_streams", "Update streams");
+                        });
+                streamsFlowable.subscribe(streams -> {
+                    Log.i("update_streams", "Update streams for playlist with uid " + pme.uid);
+
+                }, err -> {
+                    Log.e("err_retrv_streams", "Error retrieving streams", err);
+                });
+            }
+        }*/
+        Toast.makeText(getContext(), "Playlists changed", Toast.LENGTH_SHORT).show();
+    }
+
     @Override
     public void handleResult(@NonNull List<PlaylistLocalItem> result) {
         super.handleResult(result);
@@ -219,6 +365,11 @@ public final class BookmarkFragment
             showEmptyState();
             return;
         }
+
+        // OURS
+        Log.i("handle_result", "Handle result called");
+        playlistsUpdate(result);
+        // END OURS
 
         itemListAdapter.addItems(result);
         if (itemsListState != null) {
