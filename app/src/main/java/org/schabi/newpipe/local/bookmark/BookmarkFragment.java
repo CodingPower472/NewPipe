@@ -141,7 +141,6 @@ public final class BookmarkFragment
                         throw new Error("Object was not a search info");
                     }
                 }
-                Log.e("seay", streamEntities.size() + "");
                 return streamEntities;
             });
         }
@@ -461,7 +460,6 @@ public final class BookmarkFragment
                 });
             }
         }*/
-        Toast.makeText(getContext(), "Playlists changed", Toast.LENGTH_SHORT).show();
     }
 
     @Override
