@@ -2,9 +2,11 @@ package org.schabi.newpipe.local.bookmark;
 
 import android.app.AlertDialog;
 import android.app.AlertDialog.Builder;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Parcelable;
+import android.os.StrictMode;
 import android.util.Log;
 import android.widget.EditText;
 import androidx.annotation.NonNull;
@@ -15,6 +17,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+
+import io.reactivex.Scheduler;
 import io.reactivex.disposables.Disposable;
 import org.reactivestreams.Subscriber;
 import org.reactivestreams.Subscription;
@@ -25,18 +29,24 @@ import org.schabi.newpipe.database.LocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistLocalItem;
 import org.schabi.newpipe.database.playlist.PlaylistMetadataEntry;
 import org.schabi.newpipe.database.playlist.PlaylistStreamEntry;
+import org.schabi.newpipe.database.playlist.model.PlaylistEntity;
 import org.schabi.newpipe.database.playlist.model.PlaylistRemoteEntity;
 import org.schabi.newpipe.database.stream.model.StreamEntity;
+import org.schabi.newpipe.extractor.InfoItem;
+import org.schabi.newpipe.extractor.search.SearchInfo;
+import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.local.BaseLocalListFragment;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
 import org.schabi.newpipe.local.playlist.RemotePlaylistManager;
 import org.schabi.newpipe.report.UserAction;
+import org.schabi.newpipe.util.ExtractorHelper;
 import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.OnClickGesture;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 
 import icepick.State;
@@ -44,6 +54,8 @@ import io.reactivex.Flowable;
 import io.reactivex.Single;
 import io.reactivex.android.schedulers.AndroidSchedulers;
 import io.reactivex.disposables.CompositeDisposable;
+import io.reactivex.internal.schedulers.NewThreadScheduler;
+import io.reactivex.schedulers.Schedulers;
 
 public final class BookmarkFragment
         extends BaseLocalListFragment<List<PlaylistLocalItem>, Void> {
@@ -57,6 +69,84 @@ public final class BookmarkFragment
     private RemotePlaylistManager remotePlaylistManager;
     private List<String> favoritesURLs;
 
+    private void setRecommendations(List<StreamEntity> recommendations) {
+        if (recommendations.isEmpty()) return;
+        localPlaylistManager.getPlaylists()
+                .firstElement()
+                .subscribe(playlists -> {
+                    for (PlaylistLocalItem pli : playlists) {
+                        if (pli instanceof PlaylistMetadataEntry) {
+                            PlaylistMetadataEntry pme = (PlaylistMetadataEntry) pli;
+                            if (pme.getOrderingName().equalsIgnoreCase("Recommended for you")) {
+                                Log.i("found_existing", "Found existing Recommended for you");
+                                localPlaylistManager.deletePlaylist(pme.uid)
+                                        .subscribe();
+                            }
+                        }
+                    }
+                    localPlaylistManager.createPlaylist("Recommended for you", recommendations)
+                            .subscribe();
+                }, err -> {
+                    Log.e("err_set_recs", "Error setting recommendations", err);
+                });
+        /*localPlaylistManager.createPlaylist("Recommended for you", recommendations)
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe();*/
+    }
+
+    public Single<List<StreamEntity>> getRecommendations(List<PlaylistStreamEntry> liked) {
+        HashMap<String, Integer> artistFrequencies = new HashMap<>();
+        ArrayList<StreamEntity> pureLiked = new ArrayList<>();
+        Log.i("num_liked", "" + liked.size());
+        /*StreamingService service = null;
+        try {
+            service = NewPipe.getService(0); // 0 should correspond to YouTube
+        } catch (Throwable err) {
+            Log.e("error_getting_service", "Failed to get service for service ID 0: " + err);
+            return result;
+        }*/
+        List<Single<SearchInfo>> observables = new ArrayList<>();
+        for (PlaylistStreamEntry entry : liked) {
+            String artist = entry.uploader;
+            Log.i("artist", artist);
+            StreamEntity likeAsEntity = new StreamEntity(entry.serviceId, entry.title, entry.url, entry.streamType, entry.thumbnailUrl, entry.uploader, entry.duration);
+            pureLiked.add(likeAsEntity);
+            if (artistFrequencies.containsKey(artist)) {
+                artistFrequencies.put(artist, artistFrequencies.get(artist) + 1);
+            } else {
+                artistFrequencies.put(artist, 1);
+            }
+            Single<SearchInfo> ssi = ExtractorHelper.searchFor(0, artist + " music", new ArrayList<>(), "");
+            Log.i("searching", "Searching:" + artist + " music");
+            observables.add(ssi);
+        }
+        if (pureLiked.isEmpty()) {
+            return Single.just(new ArrayList<>());
+        } else {
+            return Single.zip(observables, list -> {
+                List<StreamEntity> streamEntities = new ArrayList<>();
+                for (int i = 0; i < list.length; i++) {
+                    Object si = list[i];
+                    if (si instanceof SearchInfo) {
+                        SearchInfo s = (SearchInfo) si;
+                        List<InfoItem> items = s.getRelatedItems();
+                        streamEntities.add(pureLiked.get(i));
+                        for (int j = 0; j < Math.min(10, items.size()); j++) {
+                            InfoItem item = items.get(j);
+                            if (item.getInfoType() == InfoItem.InfoType.STREAM && !item.getUrl().equals(pureLiked.get(i).getUrl())) {
+                                streamEntities.add(new StreamEntity(0, item.getName(), item.getUrl(), StreamType.VIDEO_STREAM, item.getThumbnailUrl(), "Unknown", 100));
+                            }
+                        }
+                    } else {
+                        throw new Error("Object was not a search info");
+                    }
+                }
+                Log.e("seay", streamEntities.size() + "");
+                return streamEntities;
+            });
+        }
+    }
+
     ///////////////////////////////////////////////////////////////////////////
     // Fragment LifeCycle - Creation
     ///////////////////////////////////////////////////////////////////////////
@@ -69,6 +159,11 @@ public final class BookmarkFragment
         localPlaylistManager = new LocalPlaylistManager(database);
         remotePlaylistManager = new RemotePlaylistManager(database);
         disposables = new CompositeDisposable();
+
+        // TEST
+        StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
+        StrictMode.setThreadPolicy(policy);
+        // END TEST
 
         // NOT USED, USELESS CODE:
         /*Handler handler = new Handler();
@@ -307,8 +402,11 @@ public final class BookmarkFragment
         }
         if (lastPlaylists != null && !lastPlaylists.isEmpty() && !result.isEmpty()) {
             Log.i("are_equal", "" + result.get(0).equals(lastPlaylists.get(0)));
-        }*/
-        lastPlaylists = result;
+        }
+        lastPlaylists = result;*/
+
+        boolean hasFavoritesPlaylist = false;
+
         for (PlaylistLocalItem pli : result) {
             boolean isMeta = pli instanceof PlaylistMetadataEntry;
             Log.i("found_pli", "Has playlist with name " + pli.getOrderingName() + " and is" + (isMeta ? "" : " not") + " meta");
@@ -317,7 +415,8 @@ public final class BookmarkFragment
             if (pme.getOrderingName().equalsIgnoreCase("Favorites")) {
                 Log.i("found_favorites", "Found favorites (uid " + pme.uid + ")");
                 Flowable<List<PlaylistStreamEntry>> streamsFlowable = localPlaylistManager.getPlaylistStreams(pme.uid);
-                streamsFlowable.first(new ArrayList<>())
+                hasFavoritesPlaylist = true;
+                streamsFlowable.firstElement()
                         .observeOn(AndroidSchedulers.mainThread())
                         .subscribe(streams -> {
                             List<String> urls = new ArrayList<>(streams.size());
@@ -327,10 +426,20 @@ public final class BookmarkFragment
                             if (!urls.equals(lastFavURLs)) {
                                 Log.i("update_streams", "Update streams");
                                 lastFavURLs = urls;
-
+                                getRecommendations(streams)
+                                        .subscribeOn(Schedulers.newThread())
+                                        .subscribe(recs -> {
+                                            Log.i("recom_done", "Retrieved recommendations");
+                                            setRecommendations(recs);
+                                        }, err -> {
+                                            Log.e("fail_recs", "Failed to retrieve recommendations", err);
+                                        });
                             }
                         });
             }
+        }
+        if (!hasFavoritesPlaylist) {
+            lastFavURLs = null;
         }
         /*if (result.size() > 0) {
             PlaylistLocalItem firstPli = result.get(0);
