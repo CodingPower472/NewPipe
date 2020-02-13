@@ -34,6 +34,7 @@ import org.schabi.newpipe.database.playlist.model.PlaylistRemoteEntity;
 import org.schabi.newpipe.database.stream.model.StreamEntity;
 import org.schabi.newpipe.extractor.InfoItem;
 import org.schabi.newpipe.extractor.search.SearchInfo;
+import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.local.BaseLocalListFragment;
 import org.schabi.newpipe.local.playlist.LocalPlaylistManager;
@@ -131,11 +132,19 @@ public final class BookmarkFragment
                         SearchInfo s = (SearchInfo) si;
                         List<InfoItem> items = s.getRelatedItems();
                         streamEntities.add(pureLiked.get(i));
-                        for (int j = 0; j < Math.min(10, items.size()); j++) {
+                        int numAdded = 0;
+                        for (int j = 0; j < items.size() && numAdded < 10; j++) {
                             InfoItem item = items.get(j);
-                            if (item.getInfoType() == InfoItem.InfoType.STREAM && !item.getUrl().equals(pureLiked.get(i).getUrl())) {
-                                streamEntities.add(new StreamEntity(0, item.getName(), item.getUrl(), StreamType.VIDEO_STREAM, item.getThumbnailUrl(), "Unknown", 100));
+                            if (!(item instanceof StreamInfoItem)) continue;
+                            StreamInfoItem sii = (StreamInfoItem) item;
+                            if (!sii.getUrl().equals(pureLiked.get(i).getUrl()) && sii.getDuration() < 300 /* avoid compilations and such by limiting to under 300 seconds (5 minutes) */) {
+                                numAdded++;
+                                streamEntities.add(new StreamEntity(0, sii.getName(), sii.getUrl(), StreamType.VIDEO_STREAM, sii.getThumbnailUrl(), sii.getUploaderName(), sii.getDuration()));
                             }
+                            /*if (item.getInfoType() == InfoItem.InfoType.STREAM && )) {
+
+                                streamEntities.add(new StreamEntity(0, item.getName(), item.getUrl(), StreamType.VIDEO_STREAM, item.getThumbnailUrl(), "Unknown", 100));
+                            }*/
                         }
                     } else {
                         throw new Error("Object was not a search info");
@@ -517,7 +526,7 @@ public final class BookmarkFragment
         EditText editText = dialogView.findViewById(R.id.playlist_name_edit_text);
         editText.setText(selectedItem.name);
 
-        Builder builder = new AlertDialog.Builder(activity);
+        /*Builder builder = new AlertDialog.Builder(activity);
         builder.setView(dialogView)
             .setPositiveButton(R.string.rename_playlist, (dialog, which) -> {
                 changeLocalPlaylistName(selectedItem.uid, editText.getText().toString());
@@ -529,7 +538,48 @@ public final class BookmarkFragment
                 dialog.dismiss();
             })
             .create()
-            .show();
+            .show();*/
+        Builder builder = new AlertDialog.Builder(activity);
+        builder.setView(dialogView)
+                .setItems(new CharSequence[] {"Duplicate", "Rename", "Cancel", "Delete"}, (dialog, which) -> {
+                    switch (which) {
+                        case 0:
+                            Toast.makeText(activity, "Duplicate uid " + selectedItem.uid, Toast.LENGTH_SHORT).show();
+                            duplicatePlaylist(selectedItem.uid, selectedItem.name);
+                            break;
+                        case 1:
+                            changeLocalPlaylistName(selectedItem.uid, editText.getText().toString());
+                            break;
+                        case 3:
+                            showDeleteDialog(selectedItem.name, localPlaylistManager.deletePlaylist(selectedItem.uid));
+                            dialog.dismiss();
+                            break;
+                    }
+                })
+                .create()
+                .show();
+    }
+
+    private void duplicatePlaylist(final long uid, final String playlistName) {
+        localPlaylistManager.getPlaylistStreams(uid)
+                .firstElement()
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(streams -> {
+                    List<StreamEntity> streamEntities = new ArrayList<>();
+                    for (PlaylistStreamEntry pse : streams) {
+                        StreamEntity se = new StreamEntity(pse.serviceId, pse.title, pse.url, pse.streamType, pse.thumbnailUrl, pse.uploader, pse.duration);
+                        streamEntities.add(se);
+                    }
+                    localPlaylistManager.createPlaylist(playlistName + " - copy", streamEntities)
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(longs -> {
+                                Toast.makeText(activity, "Successfully duplicated playlist", Toast.LENGTH_SHORT).show();
+                            }, err -> {
+                                Log.e("err_dup_make", "Error making duplicate playlist", err);
+                            });
+                }, err -> {
+                    Log.e("err_dup_read", "Error reading playlist streams to duplicate", err);
+                });
     }
 
     private void showDeleteDialog(final String name, final Single<Integer> deleteReactor) {

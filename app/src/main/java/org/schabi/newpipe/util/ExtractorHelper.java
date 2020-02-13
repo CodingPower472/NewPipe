@@ -233,7 +233,7 @@ public final class ExtractorHelper {
     }
 
     /**
-     * A simple and general error handler that show a Toast for known exceptions, and for others, opens the report error activity with the (optional) error message.
+     * A simple and general error handler that show a ast for known exceptions, and for others, opens the report error activity with the (optional) error message.
      */
     public static void handleGeneralException(Context context, int serviceId, String url, Throwable exception, UserAction userAction, String optionalErrorMessage) {
         final Handler handler = new Handler(context.getMainLooper());
