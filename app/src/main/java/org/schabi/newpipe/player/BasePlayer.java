@@ -56,6 +56,7 @@ import com.nostra13.universalimageloader.core.listener.ImageLoadingListener;
 
 import org.schabi.newpipe.BuildConfig;
 import org.schabi.newpipe.DownloaderImpl;
+import org.schabi.newpipe.LastBasePlayerHackyClass;
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.extractor.stream.StreamInfo;
 import org.schabi.newpipe.local.history.HistoryRecordManager;
@@ -99,6 +100,7 @@ import static com.google.android.exoplayer2.Player.DISCONTINUITY_REASON_SEEK_ADJ
 @SuppressWarnings({"WeakerAccess"})
 public abstract class BasePlayer implements
         Player.EventListener, PlaybackListener, ImageLoadingListener {
+
 
     public static final boolean DEBUG = !BuildConfig.BUILD_TYPE.equals("release");
     @NonNull
@@ -219,6 +221,17 @@ public abstract class BasePlayer implements
 
         this.loadControl = new LoadController(context);
         this.renderFactory = new DefaultRenderersFactory(context);
+
+        Log.e("new_base_player", "A new base player has been created");
+        LastBasePlayerHackyClass.lastPlayer = this;
+    }
+
+    public void hackyRewindOne() {
+        seekTo(0);
+    }
+
+    public void hackySkip() {
+        playQueue.offsetIndex(1);
     }
 
     public void setup() {
