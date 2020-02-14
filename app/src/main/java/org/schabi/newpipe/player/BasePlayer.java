@@ -226,6 +226,10 @@ public abstract class BasePlayer implements
         LastBasePlayerHackyClass.lastPlayer = this;
     }
 
+    public PlayQueueItem getCurrentSong() {
+        return playQueue.getItem();
+    }
+
     public void hackyRewindOne() {
         seekTo(0);
     }

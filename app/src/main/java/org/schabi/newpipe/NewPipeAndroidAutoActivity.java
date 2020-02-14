@@ -4,8 +4,11 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.apps.auto.sdk.CarActivity;
@@ -23,6 +26,13 @@ public class NewPipeAndroidAutoActivity extends CarActivity {
         }
     }
 
+    private void updateSongInfo(TextView name, TextView artist) {
+        BasePlayer lp = LastBasePlayerHackyClass.lastPlayer;
+        if (lp == null || lp.getVideoTitle().equalsIgnoreCase("[unknown]")) return;
+        name.setText(lp.getVideoTitle());
+        artist.setText(lp.getUploaderName());
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         Log.i("on_create_aa", "On create android auto");
@@ -32,7 +42,11 @@ public class NewPipeAndroidAutoActivity extends CarActivity {
         Button rewind = (Button) findViewById(R.id.rewind_aa);
         Button pause = (Button) findViewById(R.id.pause_aa);
         Button skip = (Button) findViewById(R.id.skip_aa);
+        TextView currentSong = (TextView) findViewById(R.id.current_song_aa);
+        TextView currentArtist = (TextView) findViewById(R.id.current_artist_aa);
+
         pause.setText(getNewTextForPlayPause());
+
         rewind.setOnClickListener(v -> {
             BasePlayer lp = LastBasePlayerHackyClass.lastPlayer;
             if (lp != null) lp.hackyRewindOne();
@@ -58,6 +72,15 @@ public class NewPipeAndroidAutoActivity extends CarActivity {
             //startActivity(intent);
             startCarActivity(intent);
         });*/
+        Handler handler = new Handler();
+        int checkSongInfoDelay = 1000;
+
+        handler.postDelayed(new Runnable() {
+            public void run() {
+                updateSongInfo(currentSong, currentArtist);
+                handler.postDelayed(this, checkSongInfoDelay);
+            }
+        }, checkSongInfoDelay);
     }
 
 }
